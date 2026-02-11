@@ -1,0 +1,290 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Orbitron:wght@400;500;600;700;800;900&family=Rajdhani:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --void: #0a0a0f;
+  --obsidian: #12121a;
+  --carbon: #1a1a24;
+  --graphite: #252532;
+  --slate: #3d3d4d;
+  --cyber-purple: #a855f7;
+  --cyber-violet: #8b5cf6;
+  --cyber-magenta: #d946ef;
+  --neon-green: #22c55e;
+  --neon-red: #ef4444;
+  --terminal: #39ff14;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--cyber-purple) var(--obsidian);
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--obsidian);
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--cyber-purple);
+  border-radius: 3px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--cyber-violet);
+}
+
+body {
+  background: var(--void);
+  color: #e2e8f0;
+  font-family: 'Rajdhani', sans-serif;
+  overflow-x: hidden;
+}
+
+/* Grid Background */
+.cyber-grid-bg {
+  background-image: 
+    linear-gradient(rgba(168, 85, 247, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(168, 85, 247, 0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+  background-position: center center;
+}
+
+/* Glowing borders */
+.glow-border {
+  box-shadow: 
+    0 0 0 1px rgba(168, 85, 247, 0.3),
+    0 0 20px rgba(168, 85, 247, 0.1),
+    inset 0 0 20px rgba(168, 85, 247, 0.05);
+}
+
+.glow-border-intense {
+  box-shadow: 
+    0 0 0 1px rgba(168, 85, 247, 0.5),
+    0 0 30px rgba(168, 85, 247, 0.2),
+    inset 0 0 30px rgba(168, 85, 247, 0.1);
+}
+
+/* Neon text */
+.text-glow {
+  text-shadow: 
+    0 0 10px currentColor,
+    0 0 20px currentColor,
+    0 0 40px currentColor;
+}
+
+.text-glow-sm {
+  text-shadow: 
+    0 0 5px currentColor,
+    0 0 10px currentColor;
+}
+
+/* Card styles */
+.cyber-card {
+  background: linear-gradient(135deg, rgba(26, 26, 36, 0.8) 0%, rgba(18, 18, 26, 0.9) 100%);
+  border: 1px solid rgba(168, 85, 247, 0.2);
+  backdrop-filter: blur(10px);
+}
+
+.cyber-card:hover {
+  border-color: rgba(168, 85, 247, 0.4);
+  box-shadow: 0 0 30px rgba(168, 85, 247, 0.15);
+}
+
+/* Button styles */
+.cyber-btn {
+  @apply relative overflow-hidden px-6 py-3 font-display font-semibold tracking-wider uppercase;
+  @apply bg-gradient-to-r from-cyber-purple to-cyber-violet;
+  @apply border border-cyber-purple/50 rounded-lg;
+  @apply transition-all duration-300 ease-out;
+  @apply hover:shadow-[0_0_30px_rgba(168,85,247,0.5)] hover:border-cyber-purple;
+  @apply active:scale-95;
+}
+
+.cyber-btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+  transition: left 0.5s ease;
+}
+
+.cyber-btn:hover::before {
+  left: 100%;
+}
+
+.cyber-btn-outline {
+  @apply relative px-6 py-3 font-display font-semibold tracking-wider uppercase;
+  @apply bg-transparent border-2 border-cyber-purple/50 rounded-lg;
+  @apply text-cyber-purple transition-all duration-300;
+  @apply hover:bg-cyber-purple/10 hover:border-cyber-purple hover:shadow-[0_0_20px_rgba(168,85,247,0.3)];
+}
+
+.cyber-btn-danger {
+  @apply relative px-6 py-3 font-display font-semibold tracking-wider uppercase;
+  @apply bg-gradient-to-r from-neon-red to-neon-orange;
+  @apply border border-neon-red/50 rounded-lg;
+  @apply transition-all duration-300 ease-out;
+  @apply hover:shadow-[0_0_30px_rgba(239,68,68,0.5)] hover:border-neon-red;
+}
+
+.cyber-btn-success {
+  @apply relative px-6 py-3 font-display font-semibold tracking-wider uppercase;
+  @apply bg-gradient-to-r from-neon-green to-cyber-teal;
+  @apply border border-neon-green/50 rounded-lg;
+  @apply transition-all duration-300 ease-out;
+  @apply hover:shadow-[0_0_30px_rgba(34,197,94,0.5)] hover:border-neon-green;
+}
+
+/* Input styles */
+.cyber-input {
+  @apply w-full px-4 py-3 bg-obsidian border border-slate/50 rounded-lg;
+  @apply text-white font-mono placeholder:text-slate;
+  @apply focus:outline-none focus:border-cyber-purple focus:ring-1 focus:ring-cyber-purple/50;
+  @apply transition-all duration-200;
+}
+
+.cyber-input:focus {
+  box-shadow: 0 0 20px rgba(168, 85, 247, 0.2);
+}
+
+/* Select styles */
+.cyber-select {
+  @apply w-full px-4 py-3 bg-obsidian border border-slate/50 rounded-lg;
+  @apply text-white font-mono appearance-none cursor-pointer;
+  @apply focus:outline-none focus:border-cyber-purple focus:ring-1 focus:ring-cyber-purple/50;
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+  background-position: right 0.5rem center;
+  background-repeat: no-repeat;
+  background-size: 1.5em 1.5em;
+}
+
+/* Terminal output */
+.terminal-output {
+  @apply font-mono text-sm leading-relaxed;
+  @apply bg-void border border-slate/30 rounded-lg p-4;
+  @apply max-h-96 overflow-auto;
+}
+
+.terminal-output .success { color: var(--neon-green); }
+.terminal-output .error { color: var(--neon-red); }
+.terminal-output .warning { color: #eab308; }
+.terminal-output .info { color: var(--cyber-purple); }
+
+/* Status indicators */
+.status-dot {
+  @apply w-2 h-2 rounded-full;
+}
+
+.status-dot.success {
+  @apply bg-neon-green;
+  box-shadow: 0 0 10px rgba(34, 197, 94, 0.5);
+}
+
+.status-dot.error {
+  @apply bg-neon-red;
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.5);
+}
+
+.status-dot.warning {
+  @apply bg-neon-yellow;
+  box-shadow: 0 0 10px rgba(234, 179, 8, 0.5);
+}
+
+.status-dot.pending {
+  @apply bg-cyber-purple animate-pulse;
+  box-shadow: 0 0 10px rgba(168, 85, 247, 0.5);
+}
+
+/* Scan line effect */
+.scan-line::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--cyber-purple), transparent);
+  animation: scan 4s linear infinite;
+}
+
+/* Badge styles */
+.cyber-badge {
+  @apply inline-flex items-center px-3 py-1 rounded-full text-xs font-display font-semibold uppercase tracking-wider;
+}
+
+.cyber-badge-purple {
+  @apply cyber-badge bg-cyber-purple/20 text-cyber-purple border border-cyber-purple/30;
+}
+
+.cyber-badge-green {
+  @apply cyber-badge bg-neon-green/20 text-neon-green border border-neon-green/30;
+}
+
+.cyber-badge-red {
+  @apply cyber-badge bg-neon-red/20 text-neon-red border border-neon-red/30;
+}
+
+.cyber-badge-yellow {
+  @apply cyber-badge bg-neon-yellow/20 text-neon-yellow border border-neon-yellow/30;
+}
+
+/* Tab styles */
+.cyber-tab {
+  @apply px-4 py-2 font-display font-semibold tracking-wider uppercase text-sm;
+  @apply border-b-2 border-transparent transition-all duration-200;
+  @apply text-slate hover:text-white;
+}
+
+.cyber-tab.active {
+  @apply text-cyber-purple border-cyber-purple;
+}
+
+/* Code block */
+.code-block {
+  @apply font-mono text-sm bg-void rounded-lg p-4 overflow-x-auto;
+  @apply border border-slate/30;
+}
+
+/* Animations */
+@keyframes scanlines {
+  0% { background-position: 0 0; }
+  100% { background-position: 0 100vh; }
+}
+
+.scanlines::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0, 0, 0, 0.1) 0px,
+    rgba(0, 0, 0, 0.1) 1px,
+    transparent 1px,
+    transparent 2px
+  );
+  pointer-events: none;
+  animation: scanlines 10s linear infinite;
+}
+
+/* Toast customization */
+.toast-cyber {
+  background: var(--carbon) !important;
+  border: 1px solid var(--cyber-purple) !important;
+  color: white !important;
+  font-family: 'Rajdhani', sans-serif !important;
+}
+

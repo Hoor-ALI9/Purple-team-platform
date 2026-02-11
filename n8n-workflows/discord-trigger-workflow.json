@@ -1,0 +1,259 @@
+{
+  "name": "Purple Team - Discord Message Trigger",
+  "nodes": [
+    {
+      "parameters": {
+        "triggerType": "message",
+        "channelId": "={{ $env.DISCORD_CHANNEL_ID }}",
+        "options": {}
+      },
+      "id": "discord-trigger",
+      "name": "Discord - Message Trigger",
+      "type": "n8n-nodes-base.discordTrigger",
+      "typeVersion": 1,
+      "position": [220, 300],
+      "webhookId": "discord-message-trigger",
+      "credentials": {
+        "discordBotApi": {
+          "id": "YOUR_DISCORD_CREDENTIAL_ID",
+          "name": "Purple Team Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-attack-result",
+              "leftValue": "={{ $json.content }}",
+              "rightValue": "PURPLE TEAM ATTACK RESULT",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-attack-result",
+      "name": "IF - Attack Result Message",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Discord message to extract attack result data\nconst message = $input.all()[0].json;\nconst content = message.content || '';\n\n// Extract execution ID\nconst execIdMatch = content.match(/Execution ID:\\s*`([^`]+)`/);\nconst executionId = execIdMatch ? execIdMatch[1] : `unknown_${Date.now()}`;\n\n// Extract attack type\nconst attackTypeMatch = content.match(/Attack Type:\\s*(\\w+)/i);\nconst attackType = attackTypeMatch ? attackTypeMatch[1].toLowerCase() : 'unknown';\n\n// Extract target\nconst targetMatch = content.match(/Target:\\s*([\\d.]+):(\\d+)/);\nconst targetIp = targetMatch ? targetMatch[1] : 'unknown';\nconst targetPort = targetMatch ? parseInt(targetMatch[2]) : 0;\n\n// Extract raw output from code block\nconst outputMatch = content.match(/```([\\s\\S]*?)```/);\nconst rawOutput = outputMatch ? outputMatch[1] : content;\n\n// Determine success\nconst success = content.includes('SESSION ESTABLISHED') || \n                rawOutput.includes('session') && rawOutput.includes('opened');\n\n// Extract session ID if present\nconst sessionMatch = rawOutput.match(/session (\\d+) opened/);\nconst sessionId = sessionMatch ? sessionMatch[1] : null;\n\nreturn [{\n  json: {\n    execution_id: executionId,\n    attack_type: attackType,\n    target_ip: targetIp,\n    target_port: targetPort,\n    raw_output: rawOutput,\n    success: success,\n    session_id: sessionId,\n    timestamp: message.timestamp || new Date().toISOString(),\n    discord_message_id: message.id,\n    discord_channel_id: message.channel_id\n  }\n}];"
+      },
+      "id": "code-parse-discord-message",
+      "name": "Code - Parse Discord Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PLATFORM_URL }}/api/webhook/attack-result",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "http-send-to-platform",
+      "name": "HTTP - Send to Platform",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [880, 200]
+    },
+    {
+      "parameters": {
+        "content": "={{ \n`✅ **Attack result processed**\nExecution ID: \\`${$('Code - Parse Discord Message').item.json.execution_id}\\`\nSending to AI analysis pipeline...`\n}}",
+        "options": {}
+      },
+      "id": "discord-confirm-processing",
+      "name": "Discord - Confirm Processing",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [1100, 200],
+      "credentials": {
+        "discordBotApi": {
+          "id": "YOUR_DISCORD_CREDENTIAL_ID",
+          "name": "Purple Team Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ JSON.stringify($('Code - Parse Discord Message').item.json) }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "You are an enterprise-grade Purple Team AI Agent. Analyze the attack execution data and return a comprehensive JSON analysis.\n\nReturn a JSON object with this structure:\n{\n  \"execution_id\": \"\",\n  \"attack_summary\": {\n    \"overview\": \"\",\n    \"attacker_objective\": \"\",\n    \"skill_level\": \"\",\n    \"confidence\": 0\n  },\n  \"attack_timeline\": [...],\n  \"impact_assessment\": {...},\n  \"remediation\": {\n    \"immediate\": [...],\n    \"short_term\": [...],\n    \"long_term\": [...]\n  },\n  \"detection_rules\": [...],\n  \"threat_intelligence\": {...},\n  \"assumptions_and_gaps\": [...],\n  \"overall_confidence\": 0\n}"
+        }
+      },
+      "id": "ai-analyze-attack",
+      "name": "AI Agent - Analyze Attack",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [1320, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validate and structure AI response\nconst items = $input.all();\nlet aiResponse = items[0].json;\nconst attackData = $('Code - Parse Discord Message').item.json;\n\n// Parse if string\nif (typeof aiResponse === 'string') {\n  try {\n    const jsonMatch = aiResponse.match(/```json\\n([\\s\\S]*?)\\n```/);\n    aiResponse = jsonMatch ? JSON.parse(jsonMatch[1]) : JSON.parse(aiResponse);\n  } catch (e) {\n    aiResponse = {};\n  }\n}\n\n// Ensure complete structure\nconst result = {\n  execution_id: aiResponse.execution_id || attackData.execution_id,\n  attack_summary: aiResponse.attack_summary || {\n    overview: 'Attack analysis completed',\n    attacker_objective: 'Remote code execution',\n    skill_level: 'Medium',\n    confidence: 70\n  },\n  attack_timeline: aiResponse.attack_timeline || [],\n  impact_assessment: aiResponse.impact_assessment || {\n    blast_radius: 'Single host',\n    assets_affected: [attackData.target_ip],\n    business_risk: 'High - Potential full system compromise',\n    worst_case_scenario: 'Complete system takeover with lateral movement'\n  },\n  remediation: {\n    immediate: (aiResponse.remediation?.immediate || [\n      {\n        id: 'imm_1',\n        title: 'Isolate Affected System',\n        description: 'Immediately isolate the compromised system from the network',\n        command: `iptables -I INPUT -s ${attackData.target_ip} -j DROP && iptables -I OUTPUT -d ${attackData.target_ip} -j DROP`,\n        target_scope: 'Network firewall / Host firewall',\n        expected_outcome: 'System isolated from network',\n        risk_if_skipped: 'Attacker may pivot to other systems',\n        requires_approval: true,\n        is_disruptive: true,\n        status: 'pending'\n      }\n    ]).map((s, i) => ({ ...s, id: s.id || `imm_${i}`, status: 'pending' })),\n    short_term: (aiResponse.remediation?.short_term || [\n      {\n        id: 'short_1',\n        title: 'Patch Vulnerable Service',\n        description: 'Update the vulnerable Samba service to latest version',\n        command: 'apt-get update && apt-get upgrade samba -y',\n        target_scope: attackData.target_ip,\n        expected_outcome: 'Samba service patched and no longer vulnerable',\n        risk_if_skipped: 'System remains vulnerable to same exploit',\n        requires_approval: true,\n        is_disruptive: false,\n        status: 'pending'\n      }\n    ]).map((s, i) => ({ ...s, id: s.id || `short_${i}`, status: 'pending' })),\n    long_term: (aiResponse.remediation?.long_term || [\n      {\n        id: 'long_1',\n        title: 'Implement Network Segmentation',\n        description: 'Segment critical services into isolated network zones',\n        command: '# Review and implement network segmentation policy',\n        target_scope: 'Network infrastructure',\n        expected_outcome: 'Reduced attack surface and blast radius',\n        risk_if_skipped: 'Continued risk of lateral movement',\n        requires_approval: true,\n        is_disruptive: false,\n        status: 'pending'\n      }\n    ]).map((s, i) => ({ ...s, id: s.id || `long_${i}`, status: 'pending' }))\n  },\n  detection_rules: (aiResponse.detection_rules || [\n    {\n      id: 'rule_1',\n      rule_name: 'Samba Exploitation Attempt',\n      description: 'Detects potential exploitation of Samba usermap_script vulnerability',\n      index: 'logs-*, filebeat-*, packetbeat-*',\n      query: 'destination.port:445 AND network.protocol:smb AND event.action:connection_attempted',\n      severity: 'critical',\n      mitre: ['T1190'],\n      false_positives: 'Legitimate SMB traffic to port 445',\n      tuning_notes: 'Add exceptions for known file servers',\n      status: 'draft'\n    },\n    {\n      id: 'rule_2',\n      rule_name: 'Reverse Shell Connection',\n      description: 'Detects outbound connections typical of reverse shells',\n      index: 'logs-*, packetbeat-*',\n      query: `source.ip:${attackData.target_ip} AND destination.port:(4444 OR 4445 OR 4446 OR 5555) AND network.direction:outbound`,\n      severity: 'high',\n      mitre: ['T1059', 'T1059.004'],\n      false_positives: 'Some legitimate applications may use these ports',\n      tuning_notes: 'Add known good destination IPs to allowlist',\n      status: 'draft'\n    }\n  ]).map((r, i) => ({ ...r, id: r.id || `rule_${i}`, status: 'draft' })),\n  threat_intelligence: aiResponse.threat_intelligence || {\n    summary: 'CVE-2007-2447 is a well-known vulnerability in Samba versions 3.0.20 through 3.0.25rc3',\n    ioc_correlation: [],\n    confidence: 80\n  },\n  assumptions_and_gaps: aiResponse.assumptions_and_gaps || [\n    'Limited visibility into post-exploitation activity',\n    'No EDR telemetry available for process execution analysis'\n  ],\n  overall_confidence: aiResponse.overall_confidence || 75\n};\n\nreturn [{ json: result }];"
+      },
+      "id": "code-validate-response",
+      "name": "Code - Validate Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1540, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PLATFORM_URL }}/api/webhook/ai-analysis",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "http-send-analysis",
+      "name": "HTTP - Send Analysis to Platform",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1760, 200]
+    },
+    {
+      "parameters": {
+        "content": "={{ \nconst analysis = $('Code - Validate Response').item.json;\n\n`**🤖 AI ANALYSIS COMPLETE**\n\n**Execution ID:** \\`${analysis.execution_id}\\`\n**Confidence:** ${analysis.overall_confidence}%\n\n📊 **Summary:** ${analysis.attack_summary.overview.substring(0, 300)}...\n\n**🔧 Remediation:** ${analysis.remediation.immediate.length + analysis.remediation.short_term.length + analysis.remediation.long_term.length} steps generated\n**🛡️ Detection Rules:** ${analysis.detection_rules.length} rules generated\n\n_Full analysis available in Purple Team Platform_`\n}}",
+        "options": {}
+      },
+      "id": "discord-send-analysis-complete",
+      "name": "Discord - Analysis Complete",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [1980, 200],
+      "credentials": {
+        "discordBotApi": {
+          "id": "YOUR_DISCORD_CREDENTIAL_ID",
+          "name": "Purple Team Bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Discord - Message Trigger": {
+      "main": [
+        [
+          {
+            "node": "IF - Attack Result Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Attack Result Message": {
+      "main": [
+        [
+          {
+            "node": "Code - Parse Discord Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Parse Discord Message": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Send to Platform",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Send to Platform": {
+      "main": [
+        [
+          {
+            "node": "Discord - Confirm Processing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Discord - Confirm Processing": {
+      "main": [
+        [
+          {
+            "node": "AI Agent - Analyze Attack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent - Analyze Attack": {
+      "main": [
+        [
+          {
+            "node": "Code - Validate Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Validate Response": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Send Analysis to Platform",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Send Analysis to Platform": {
+      "main": [
+        [
+          {
+            "node": "Discord - Analysis Complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "purple-team"
+    },
+    {
+      "name": "discord"
+    }
+  ],
+  "triggerCount": 0,
+  "updatedAt": "2026-02-06T00:00:00.000Z",
+  "versionId": "1"
+}
+

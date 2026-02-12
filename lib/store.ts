@@ -55,10 +55,22 @@ export interface AIAnalysis {
 export interface CVEAnalysis {
   exploit_name: string
   cve_id: string
-  what_actually_happened: string
+  what_actually_happened?: string
   remediation_steps: string
   sigma_detection_queries: string
   endpoint_mitigation_commands: string
+}
+
+export interface ExternalCVEResult {
+  execution_id: string
+  source: 'python_script' | 'discord_bot'
+  timestamp: string
+  results: CVEAnalysis[]
+  metadata?: {
+    json_file?: string
+    message_id?: string
+    channel_id?: string
+  }
 }
 
 export interface AIPromptSettings {
@@ -290,6 +302,7 @@ interface PurpleTeamStore {
   addAnalysis: (analysis: AIAnalysis) => void
   setCurrentAnalysis: (analysis: AIAnalysis | null) => void
   updateCVEAnalysis: (analysisId: string, cveAnalysis: CVEAnalysis[]) => void
+  fetchImportedAnalyses: () => Promise<number>
 
   // Remediation
   updateRemediationStatus: (analysisId: string, stepId: string, status: RemediationStep['status']) => void
@@ -358,6 +371,13 @@ interface PurpleTeamStore {
   aiPromptSettings: AIPromptSettings
   updateAIPromptSettings: (settings: Partial<AIPromptSettings>) => void
   resetAIPromptSettings: () => void
+
+  // External CVE Results (from Python script / Discord bot)
+  externalCVEResults: ExternalCVEResult[]
+  addExternalCVEResult: (result: ExternalCVEResult) => void
+  clearExternalCVEResults: () => void
+  selectedExternalCVEResult: ExternalCVEResult | null
+  setSelectedExternalCVEResult: (result: ExternalCVEResult | null) => void
 }
 
 interface Notification {
@@ -404,6 +424,46 @@ export const usePurpleTeamStore = create<PurpleTeamStore>()(
               ? { ...state.currentAnalysis, cve_analysis: cveAnalysis }
               : state.currentAnalysis,
         })),
+      fetchImportedAnalyses: async () => {
+        try {
+          const resp = await fetch('/api/webhook/analysis-import', {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' },
+          })
+
+          if (!resp.ok) return 0
+          const data = await resp.json()
+          const imported: AIAnalysis[] = Array.isArray(data?.analyses) ? data.analyses : []
+          if (imported.length === 0) return 0
+
+          const normalizeConfidence = (value: any) => {
+            if (typeof value !== 'number' || Number.isNaN(value)) return 0
+            if (value <= 1) return Math.round(value * 100)
+            return Math.round(value)
+          }
+
+          const normalizedImported = imported.map((a) => ({
+            ...a,
+            overall_confidence: normalizeConfidence((a as any).overall_confidence),
+          }))
+
+          let addedCount = 0
+          set((state) => {
+            const existingIds = new Set(state.analyses.map((a) => a.execution_id))
+            const newOnes = normalizedImported.filter((a) => !existingIds.has(a.execution_id))
+            addedCount = newOnes.length
+            if (newOnes.length === 0) return state
+            return {
+              ...state,
+              analyses: [...newOnes, ...state.analyses],
+            }
+          })
+
+          return addedCount
+        } catch {
+          return 0
+        }
+      },
 
       // Remediation
       updateRemediationStatus: (analysisId, stepId, status) =>
@@ -674,6 +734,19 @@ export const usePurpleTeamStore = create<PurpleTeamStore>()(
             getWhatActuallyHappened: 'Based on the following pentest attack results, provide a clear and detailed summary of what actually happened during the attack.\nInclude: attack type, target information, exploitation method, successful actions, and any evidence of compromise.\n\nExploit/Vulnerability: {exploit_name}\n\nAttack Results:\n{attack_results}\n\nProvide a comprehensive summary of the actual attack execution and its outcomes.',
           },
         }),
+
+      // External CVE Results (from Python script / Discord bot)
+      externalCVEResults: [],
+      addExternalCVEResult: (result) =>
+        set((state) => ({
+          externalCVEResults: [result, ...state.externalCVEResults].slice(0, 100),
+          selectedExternalCVEResult: result,
+        })),
+      clearExternalCVEResults: () =>
+        set({ externalCVEResults: [], selectedExternalCVEResult: null }),
+      selectedExternalCVEResult: null,
+      setSelectedExternalCVEResult: (result) =>
+        set({ selectedExternalCVEResult: result }),
     }),
     {
       name: 'purple-team-storage',
@@ -688,6 +761,7 @@ export const usePurpleTeamStore = create<PurpleTeamStore>()(
         artConsoleOutput: state.artConsoleOutput,
         credentialedHistory: state.credentialedHistory,
         attackVectors: state.attackVectors,
+        externalCVEResults: state.externalCVEResults,
       }),
     }
   )

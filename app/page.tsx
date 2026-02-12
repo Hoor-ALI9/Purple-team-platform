@@ -44,6 +44,11 @@ const SettingsPage = dynamic(() => import('@/components/pages/SettingsPage'), {
   ssr: false,
 })
 
+const CVEResultsPage = dynamic(() => import('@/components/pages/CVEResultsPage'), {
+  loading: () => <PageSkeleton />,
+  ssr: false,
+})
+
 // Loading skeleton component
 function PageSkeleton() {
   return (
@@ -83,6 +88,8 @@ export default function Home() {
         return <AIRemediationPage />
       case 'ai-rules':
         return <AISIEMRulesPage />
+      case 'ai-cve-results':
+        return <CVEResultsPage />
       case 'threat-intel':
         return <ThreatIntelPage />
       case 'alerts':

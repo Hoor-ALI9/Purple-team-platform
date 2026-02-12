@@ -17,6 +17,7 @@ import {
   ShieldExclamationIcon,
   Bars3Icon,
   XMarkIcon,
+  BugAntIcon,
 } from '@heroicons/react/24/outline'
 
 const navigation = [
@@ -41,6 +42,7 @@ const navigation = [
       { id: 'ai-ingest', name: 'Ingest & Report' },
       { id: 'ai-remediation', name: 'Remediation' },
       { id: 'ai-rules', name: 'SIEM Rules' },
+      { id: 'ai-cve-results', name: 'CVE Results' },
     ],
   },
   {

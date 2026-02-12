@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { usePurpleTeamStore, AIAnalysis } from '@/lib/store'
 import toast from 'react-hot-toast'
@@ -35,11 +35,35 @@ export default function AIIngestPage() {
     updateAIPromptSettings,
     resetAIPromptSettings,
     attackVectors,
+    fetchImportedAnalyses,
   } = usePurpleTeamStore()
   const [selectedAnalysis, setSelectedAnalysis] = useState<AIAnalysis | null>(currentAnalysis)
   const [showSettings, setShowSettings] = useState(false)
   const [tempPromptSettings, setTempPromptSettings] = useState(aiPromptSettings)
   const reportRef = useRef<HTMLDivElement>(null)
+
+  // Auto-import analyses created by the Python/Discord pipeline
+  useEffect(() => {
+    let mounted = true
+    const runOnce = async () => {
+      try {
+        const added = await fetchImportedAnalyses()
+        if (!mounted) return
+        if (added > 0) {
+          toast.success(`Imported ${added} new analysis(es)`)
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    runOnce()
+    const interval = setInterval(runOnce, 8000)
+    return () => {
+      mounted = false
+      clearInterval(interval)
+    }
+  }, [fetchImportedAnalyses])
 
   const handleAnalysisSelect = (analysis: AIAnalysis) => {
     setSelectedAnalysis(analysis)

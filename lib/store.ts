@@ -307,6 +307,16 @@ interface PurpleTeamStore {
   // Remediation
   updateRemediationStatus: (analysisId: string, stepId: string, status: RemediationStep['status']) => void
   updateRemediationCommand: (analysisId: string, stepId: string, command: string) => void
+  addRemediationStep: (
+    analysisId: string,
+    phase: 'immediate' | 'short_term' | 'long_term',
+    step: RemediationStep
+  ) => void
+  removeRemediationStep: (
+    analysisId: string,
+    phase: 'immediate' | 'short_term' | 'long_term',
+    stepId: string
+  ) => void
 
   // Detection Rules
   updateRuleStatus: (analysisId: string, ruleId: string, status: DetectionRule['status']) => void
@@ -522,6 +532,69 @@ export const usePurpleTeamStore = create<PurpleTeamStore>()(
               },
             }
           }),
+          currentAnalysis:
+            state.currentAnalysis?.execution_id === analysisId
+              ? {
+                  ...state.currentAnalysis,
+                  remediation: {
+                    immediate: state.currentAnalysis.remediation.immediate.map((s) =>
+                      s.id === stepId ? { ...s, command } : s
+                    ),
+                    short_term: state.currentAnalysis.remediation.short_term.map((s) =>
+                      s.id === stepId ? { ...s, command } : s
+                    ),
+                    long_term: state.currentAnalysis.remediation.long_term.map((s) =>
+                      s.id === stepId ? { ...s, command } : s
+                    ),
+                  },
+                }
+              : state.currentAnalysis,
+        })),
+      addRemediationStep: (analysisId, phase, step) =>
+        set((state) => ({
+          analyses: state.analyses.map((a) => {
+            if (a.execution_id !== analysisId) return a
+            return {
+              ...a,
+              remediation: {
+                ...a.remediation,
+                [phase]: [step, ...a.remediation[phase]],
+              },
+            }
+          }),
+          currentAnalysis:
+            state.currentAnalysis?.execution_id === analysisId
+              ? {
+                  ...state.currentAnalysis,
+                  remediation: {
+                    ...state.currentAnalysis.remediation,
+                    [phase]: [step, ...state.currentAnalysis.remediation[phase]],
+                  },
+                }
+              : state.currentAnalysis,
+        })),
+      removeRemediationStep: (analysisId, phase, stepId) =>
+        set((state) => ({
+          analyses: state.analyses.map((a) => {
+            if (a.execution_id !== analysisId) return a
+            return {
+              ...a,
+              remediation: {
+                ...a.remediation,
+                [phase]: a.remediation[phase].filter((s) => s.id !== stepId),
+              },
+            }
+          }),
+          currentAnalysis:
+            state.currentAnalysis?.execution_id === analysisId
+              ? {
+                  ...state.currentAnalysis,
+                  remediation: {
+                    ...state.currentAnalysis.remediation,
+                    [phase]: state.currentAnalysis.remediation[phase].filter((s) => s.id !== stepId),
+                  },
+                }
+              : state.currentAnalysis,
         })),
 
       // Detection Rules

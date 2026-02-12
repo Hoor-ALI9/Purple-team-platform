@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion } from 'framer-motion'
 import { usePurpleTeamStore, DetectionRule } from '@/lib/store'
 import toast from 'react-hot-toast'
 import {
@@ -9,31 +9,63 @@ import {
   CloudArrowUpIcon,
   SparklesIcon,
   DocumentDuplicateIcon,
-  CheckIcon,
-  CodeBracketIcon,
-  AdjustmentsHorizontalIcon,
-  ExclamationTriangleIcon,
-  InformationCircleIcon,
 } from '@heroicons/react/24/outline'
 
 export default function AISIEMRulesPage() {
   const {
     currentAnalysis,
     n8nConfig,
-    updateRuleStatus,
-    updateRuleEnrichment,
     setIsLoading,
     setLoadingMessage,
     addNotification,
   } = usePurpleTeamStore()
 
-  const [expandedRule, setExpandedRule] = useState<string | null>(null)
-  const [enrichingRule, setEnrichingRule] = useState<string | null>(null)
+  const [enriching, setEnriching] = useState(false)
+  const [enrichment, setEnrichment] = useState('')
+  const [applied, setApplied] = useState(false)
 
-  const handleEnrichRule = async (rule: DetectionRule) => {
+  const [ruleName, setRuleName] = useState('')
+  const [description, setDescription] = useState('')
+  const [index, setIndex] = useState('logs-*, winlogbeat-*')
+  const [severity, setSeverity] = useState<DetectionRule['severity']>('medium')
+  const [mitreInput, setMitreInput] = useState('')
+  const [query, setQuery] = useState('')
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text)
+    toast.success('Copied to clipboard')
+  }
+
+  const buildRule = (): DetectionRule => {
+    const mitre = mitreInput
+      .split(',')
+      .map((t) => t.trim())
+      .filter(Boolean)
+
+    return {
+      id: `manual_${Date.now()}`,
+      rule_name: ruleName.trim() || 'Manual Rule',
+      description: description.trim() || 'Manual SIEM rule',
+      index: index.trim() || 'logs-*',
+      query: query,
+      severity,
+      mitre,
+      false_positives: '',
+      tuning_notes: '',
+      status: applied ? 'applied' : enrichment ? 'enriched' : 'draft',
+      enrichment_data: enrichment || undefined,
+    }
+  }
+
+  const handleEnrichRule = async () => {
     if (!currentAnalysis) return
+    if (!query.trim()) {
+      toast.error('Rule query is required')
+      return
+    }
 
-    setEnrichingRule(rule.id)
+    const rule = buildRule()
+    setEnriching(true)
     setIsLoading(true)
     setLoadingMessage('Enriching rule with threat intelligence...')
 
@@ -57,11 +89,8 @@ export default function AISIEMRulesPage() {
 
       if (response.ok) {
         const result = await response.json()
-        updateRuleEnrichment(
-          currentAnalysis.execution_id,
-          rule.id,
-          result.enrichment || 'Threat intelligence enrichment applied'
-        )
+        setEnrichment(result.enrichment || 'Threat intelligence enrichment applied')
+        setApplied(false)
         toast.success('Rule enriched with threat intelligence')
       } else {
         throw new Error('Enrichment failed')
@@ -69,20 +98,26 @@ export default function AISIEMRulesPage() {
     } catch (error) {
       toast.error('Failed to enrich rule')
     } finally {
-      setEnrichingRule(null)
+      setEnriching(false)
       setIsLoading(false)
       setLoadingMessage('')
     }
   }
 
-  const handleApplyRule = async (rule: DetectionRule) => {
+  const handleApplyRule = async () => {
     if (!currentAnalysis) return
+    if (!query.trim()) {
+      toast.error('Rule query is required')
+      return
+    }
 
     setIsLoading(true)
     setLoadingMessage('Uploading rule to Elastic SIEM...')
 
     try {
       const webhookUrl = `${n8nConfig.base_url}${n8nConfig.webhook_elastic_rule}`
+
+      const rule = buildRule()
 
       // Format rule for Elastic Security
       const elasticRule = {
@@ -100,7 +135,7 @@ export default function AISIEMRulesPage() {
             name: technique,
           },
         })),
-        tags: ['purple-team', 'automated', ...rule.mitre],
+        tags: ['purple-team', 'manual', ...rule.mitre],
         enabled: true,
       }
 
@@ -119,7 +154,7 @@ export default function AISIEMRulesPage() {
       })
 
       if (response.ok) {
-        updateRuleStatus(currentAnalysis.execution_id, rule.id, 'applied')
+        setApplied(true)
 
         addNotification({
           id: `notif_${Date.now()}`,
@@ -141,35 +176,6 @@ export default function AISIEMRulesPage() {
     }
   }
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text)
-    toast.success('Copied to clipboard')
-  }
-
-  const getSeverityColor = (severity: string) => {
-    switch (severity) {
-      case 'critical':
-        return 'bg-neon-red/20 text-neon-red border-neon-red/30'
-      case 'high':
-        return 'bg-neon-orange/20 text-neon-orange border-neon-orange/30'
-      case 'medium':
-        return 'bg-neon-yellow/20 text-neon-yellow border-neon-yellow/30'
-      default:
-        return 'bg-cyber-cyan/20 text-cyber-cyan border-cyber-cyan/30'
-    }
-  }
-
-  const getStatusBadge = (status: DetectionRule['status']) => {
-    switch (status) {
-      case 'draft':
-        return <span className="cyber-badge bg-slate/20 text-slate border-slate/30">DRAFT</span>
-      case 'enriched':
-        return <span className="cyber-badge-purple">ENRICHED</span>
-      case 'applied':
-        return <span className="cyber-badge-green">APPLIED</span>
-    }
-  }
-
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -186,179 +192,124 @@ export default function AISIEMRulesPage() {
       </div>
 
       {currentAnalysis ? (
-        <div className="space-y-4">
-          {currentAnalysis.detection_rules.length === 0 ? (
-            <div className="cyber-card rounded-2xl p-12 text-center">
-              <ShieldExclamationIcon className="w-16 h-16 mx-auto mb-4 text-slate opacity-50" />
-              <p className="text-slate">No detection rules generated</p>
+        <div className="cyber-card rounded-2xl p-6 space-y-5">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs font-display tracking-wider text-slate">RULE NAME</label>
+              <input
+                value={ruleName}
+                onChange={(e) => setRuleName(e.target.value)}
+                className="cyber-input"
+                placeholder="Manual rule name"
+              />
             </div>
-          ) : (
-            currentAnalysis.detection_rules.map((rule, index) => (
-              <motion.div
-                key={rule.id}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: index * 0.1 }}
-                className="cyber-card rounded-2xl overflow-hidden"
+            <div>
+              <label className="text-xs font-display tracking-wider text-slate">SEVERITY</label>
+              <select
+                value={severity}
+                onChange={(e) => setSeverity(e.target.value as DetectionRule['severity'])}
+                className="cyber-input"
               >
-                {/* Rule Header */}
-                <div
-                  className="p-6 cursor-pointer"
-                  onClick={() => setExpandedRule(expandedRule === rule.id ? null : rule.id)}
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-2">
-                        <h3 className="font-display text-lg font-semibold tracking-wider text-white">
-                          {rule.rule_name}
-                        </h3>
-                        <span className={`cyber-badge ${getSeverityColor(rule.severity)}`}>
-                          {rule.severity.toUpperCase()}
-                        </span>
-                        {getStatusBadge(rule.status)}
-                      </div>
-                      <p className="text-slate text-sm">{rule.description}</p>
-                      <div className="flex flex-wrap gap-2 mt-3">
-                        {rule.mitre.map((technique) => (
-                          <span
-                            key={technique}
-                            className="px-2 py-1 bg-cyber-purple/20 text-cyber-purple text-xs rounded font-mono"
-                          >
-                            {technique}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                    <motion.div
-                      animate={{ rotate: expandedRule === rule.id ? 180 : 0 }}
-                      transition={{ duration: 0.2 }}
-                    >
-                      <svg className="w-6 h-6 text-slate" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                      </svg>
-                    </motion.div>
-                  </div>
+                <option value="low">low</option>
+                <option value="medium">medium</option>
+                <option value="high">high</option>
+                <option value="critical">critical</option>
+              </select>
+            </div>
+            <div className="lg:col-span-2">
+              <label className="text-xs font-display tracking-wider text-slate">DESCRIPTION</label>
+              <input
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                className="cyber-input"
+                placeholder="What this rule detects"
+              />
+            </div>
+            <div className="lg:col-span-2">
+              <label className="text-xs font-display tracking-wider text-slate">INDEX (comma-separated)</label>
+              <input
+                value={index}
+                onChange={(e) => setIndex(e.target.value)}
+                className="cyber-input font-mono text-xs"
+                placeholder="logs-*, winlogbeat-*"
+              />
+            </div>
+            <div className="lg:col-span-2">
+              <label className="text-xs font-display tracking-wider text-slate">MITRE TECHNIQUES (comma-separated)</label>
+              <input
+                value={mitreInput}
+                onChange={(e) => setMitreInput(e.target.value)}
+                className="cyber-input font-mono text-xs"
+                placeholder="T1059,T1047"
+              />
+            </div>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-display tracking-wider text-slate">SIEM RULE / QUERY</span>
+              <button
+                onClick={() => copyToClipboard(query)}
+                className="flex items-center gap-1 text-xs text-cyber-purple hover:text-white transition-colors"
+              >
+                <DocumentDuplicateIcon className="w-4 h-4" />
+                Copy
+              </button>
+            </div>
+            <textarea
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              className="cyber-input font-mono text-sm"
+              rows={10}
+              placeholder="Paste/write KQL, EQL, or query here..."
+            />
+          </div>
+
+          {enrichment && (
+            <div className="p-4 bg-cyber-purple/5 border border-cyber-purple/20 rounded-xl">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <SparklesIcon className="w-5 h-5 text-cyber-purple" />
+                  <span className="text-xs font-display tracking-wider text-cyber-purple">THREAT INTELLIGENCE ENRICHMENT</span>
                 </div>
+                <button
+                  onClick={() => copyToClipboard(enrichment)}
+                  className="flex items-center gap-1 text-xs text-cyber-purple hover:text-white transition-colors"
+                >
+                  <DocumentDuplicateIcon className="w-4 h-4" />
+                  Copy
+                </button>
+              </div>
+              <pre className="text-sm text-white whitespace-pre-wrap">{enrichment}</pre>
+            </div>
+          )}
 
-                {/* Expanded Content */}
-                <AnimatePresence>
-                  {expandedRule === rule.id && (
-                    <motion.div
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: 'auto', opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      transition={{ duration: 0.2 }}
-                      className="border-t border-slate/20"
-                    >
-                      <div className="p-6 space-y-4">
-                        {/* Query */}
-                        <div>
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="text-xs font-display tracking-wider text-slate flex items-center gap-2">
-                              <CodeBracketIcon className="w-4 h-4" />
-                              QUERY ({rule.query.includes('sequence') ? 'EQL' : 'KQL'})
-                            </span>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                copyToClipboard(rule.query)
-                              }}
-                              className="flex items-center gap-1 text-xs text-cyber-purple hover:text-white transition-colors"
-                            >
-                              <DocumentDuplicateIcon className="w-4 h-4" />
-                              Copy
-                            </button>
-                          </div>
-                          <div className="code-block">
-                            <code className="text-terminal text-sm whitespace-pre-wrap">{rule.query}</code>
-                          </div>
-                        </div>
+          <div className="flex gap-3 pt-2">
+            <motion.button
+              onClick={handleEnrichRule}
+              disabled={enriching}
+              className="flex-1 cyber-btn-outline flex items-center justify-center gap-2"
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+            >
+              <SparklesIcon className="w-5 h-5" />
+              {enriching ? 'ENRICHING...' : 'ENRICH TI'}
+            </motion.button>
+            <motion.button
+              onClick={handleApplyRule}
+              className="flex-1 cyber-btn-success flex items-center justify-center gap-2"
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+            >
+              <CloudArrowUpIcon className="w-5 h-5" />
+              APPLY TO ELASTIC
+            </motion.button>
+          </div>
 
-                        {/* Index */}
-                        <div>
-                          <span className="text-xs font-display tracking-wider text-slate">INDEX PATTERN</span>
-                          <p className="font-mono text-sm text-white mt-1">{rule.index}</p>
-                        </div>
-
-                        {/* False Positives */}
-                        <div className="p-4 bg-neon-yellow/5 rounded-lg border border-neon-yellow/20">
-                          <div className="flex items-center gap-2 mb-2">
-                            <ExclamationTriangleIcon className="w-5 h-5 text-neon-yellow" />
-                            <span className="text-xs font-display tracking-wider text-neon-yellow">
-                              FALSE POSITIVES
-                            </span>
-                          </div>
-                          <p className="text-slate text-sm">{rule.false_positives}</p>
-                        </div>
-
-                        {/* Tuning Notes */}
-                        <div className="p-4 bg-cyber-cyan/5 rounded-lg border border-cyber-cyan/20">
-                          <div className="flex items-center gap-2 mb-2">
-                            <AdjustmentsHorizontalIcon className="w-5 h-5 text-cyber-cyan" />
-                            <span className="text-xs font-display tracking-wider text-cyber-cyan">
-                              TUNING RECOMMENDATIONS
-                            </span>
-                          </div>
-                          <p className="text-slate text-sm">{rule.tuning_notes}</p>
-                        </div>
-
-                        {/* Enrichment Data */}
-                        {rule.enrichment_data && (
-                          <div className="p-4 bg-cyber-purple/5 rounded-lg border border-cyber-purple/20">
-                            <div className="flex items-center gap-2 mb-2">
-                              <SparklesIcon className="w-5 h-5 text-cyber-purple" />
-                              <span className="text-xs font-display tracking-wider text-cyber-purple">
-                                THREAT INTELLIGENCE ENRICHMENT
-                              </span>
-                            </div>
-                            <p className="text-slate text-sm whitespace-pre-wrap">{rule.enrichment_data}</p>
-                          </div>
-                        )}
-
-                        {/* Actions */}
-                        <div className="flex gap-3 pt-4 border-t border-slate/20">
-                          {rule.status !== 'applied' && (
-                            <>
-                              <motion.button
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  handleEnrichRule(rule)
-                                }}
-                                disabled={enrichingRule === rule.id}
-                                className="flex-1 cyber-btn-outline flex items-center justify-center gap-2"
-                                whileHover={{ scale: 1.02 }}
-                                whileTap={{ scale: 0.98 }}
-                              >
-                                <SparklesIcon className={`w-5 h-5 ${enrichingRule === rule.id ? 'animate-pulse' : ''}`} />
-                                {enrichingRule === rule.id ? 'ENRICHING...' : 'ENRICH WITH TI'}
-                              </motion.button>
-                              <motion.button
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  handleApplyRule(rule)
-                                }}
-                                className="flex-1 cyber-btn flex items-center justify-center gap-2"
-                                whileHover={{ scale: 1.02 }}
-                                whileTap={{ scale: 0.98 }}
-                              >
-                                <CloudArrowUpIcon className="w-5 h-5" />
-                                APPLY TO ELASTIC
-                              </motion.button>
-                            </>
-                          )}
-                          {rule.status === 'applied' && (
-                            <div className="flex-1 flex items-center justify-center gap-2 py-3 text-neon-green">
-                              <CheckIcon className="w-5 h-5" />
-                              <span className="font-display tracking-wider">Rule Applied to Elastic SIEM</span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </motion.div>
-            ))
+          {applied && (
+            <div className="text-neon-green text-sm font-display tracking-wider">
+              APPLIED
+            </div>
           )}
         </div>
       ) : (
@@ -368,11 +319,10 @@ export default function AISIEMRulesPage() {
             No Analysis Selected
           </h2>
           <p className="text-slate">
-            Select an analysis from the Ingest page to view detection rules
+            Select an analysis from the Ingest page to use the SIEM rule editor
           </p>
         </div>
       )}
     </div>
   )
 }
-

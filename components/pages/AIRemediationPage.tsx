@@ -10,6 +10,8 @@ import {
   XMarkIcon,
   PencilIcon,
   PlayIcon,
+  PlusIcon,
+  TrashIcon,
   ClockIcon,
   ExclamationTriangleIcon,
   ShieldCheckIcon,
@@ -22,6 +24,8 @@ export default function AIRemediationPage() {
     n8nConfig, 
     updateRemediationStatus, 
     updateRemediationCommand,
+    addRemediationStep,
+    removeRemediationStep,
     setIsLoading,
     setLoadingMessage,
     addNotification,
@@ -30,6 +34,18 @@ export default function AIRemediationPage() {
   const [editingStep, setEditingStep] = useState<string | null>(null)
   const [editedCommand, setEditedCommand] = useState('')
   const [activePhase, setActivePhase] = useState<'immediate' | 'short_term' | 'long_term'>('immediate')
+
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [newStep, setNewStep] = useState({
+    title: '',
+    description: '',
+    command: '',
+    target_scope: 'endpoint',
+    expected_outcome: '',
+    risk_if_skipped: '',
+    requires_approval: true,
+    is_disruptive: false,
+  })
 
   const handleEditClick = (step: RemediationStep) => {
     setEditingStep(step.id)
@@ -104,6 +120,47 @@ export default function AIRemediationPage() {
     }
   }
 
+  const handleAddManualStep = () => {
+    if (!currentAnalysis) return
+    if (!newStep.title.trim() || !newStep.command.trim()) {
+      toast.error('Title and command are required')
+      return
+    }
+
+    const step: RemediationStep = {
+      id: `manual_${Date.now()}`,
+      title: newStep.title.trim(),
+      description: newStep.description.trim() || 'Manual remediation step',
+      command: newStep.command,
+      target_scope: newStep.target_scope.trim() || 'endpoint',
+      expected_outcome: newStep.expected_outcome.trim() || 'N/A',
+      risk_if_skipped: newStep.risk_if_skipped.trim() || 'N/A',
+      requires_approval: !!newStep.requires_approval,
+      is_disruptive: !!newStep.is_disruptive,
+      status: 'pending',
+    }
+
+    addRemediationStep(currentAnalysis.execution_id, activePhase, step)
+    setShowAddModal(false)
+    setNewStep({
+      title: '',
+      description: '',
+      command: '',
+      target_scope: 'endpoint',
+      expected_outcome: '',
+      risk_if_skipped: '',
+      requires_approval: true,
+      is_disruptive: false,
+    })
+    toast.success('Manual remediation step added')
+  }
+
+  const handleDeleteStep = (stepId: string) => {
+    if (!currentAnalysis) return
+    removeRemediationStep(currentAnalysis.execution_id, activePhase, stepId)
+    toast.success('Step deleted')
+  }
+
   const getPhaseSteps = () => {
     if (!currentAnalysis) return []
     return currentAnalysis.remediation[activePhase]
@@ -148,7 +205,140 @@ export default function AIRemediationPage() {
             Review, edit, and execute remediation commands with human approval
           </p>
         </div>
+        {currentAnalysis && (
+          <motion.button
+            onClick={() => setShowAddModal(true)}
+            className="cyber-btn flex items-center gap-2"
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+          >
+            <PlusIcon className="w-5 h-5" />
+            ADD MANUAL STEP
+          </motion.button>
+        )}
       </div>
+
+      {showAddModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="cyber-card w-full max-w-2xl rounded-2xl p-6"
+          >
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <h2 className="font-display text-lg font-semibold tracking-wider text-white">
+                  ADD MANUAL REMEDIATION STEP
+                </h2>
+                <p className="text-sm text-slate mt-1">
+                  This step will be added to the current phase and can be executed via n8n.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowAddModal(false)}
+                className="text-slate hover:text-white transition-colors"
+              >
+                <XMarkIcon className="w-6 h-6" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="md:col-span-2">
+                <label className="text-xs font-display tracking-wider text-slate">TITLE *</label>
+                <input
+                  value={newStep.title}
+                  onChange={(e) => setNewStep((s) => ({ ...s, title: e.target.value }))}
+                  className="cyber-input"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="text-xs font-display tracking-wider text-slate">DESCRIPTION</label>
+                <input
+                  value={newStep.description}
+                  onChange={(e) => setNewStep((s) => ({ ...s, description: e.target.value }))}
+                  className="cyber-input"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="text-xs font-display tracking-wider text-slate">COMMAND *</label>
+                <textarea
+                  value={newStep.command}
+                  onChange={(e) => setNewStep((s) => ({ ...s, command: e.target.value }))}
+                  className="cyber-input font-mono text-sm"
+                  rows={4}
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-display tracking-wider text-slate">TARGET SCOPE</label>
+                <input
+                  value={newStep.target_scope}
+                  onChange={(e) => setNewStep((s) => ({ ...s, target_scope: e.target.value }))}
+                  className="cyber-input"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-display tracking-wider text-slate">EXPECTED OUTCOME</label>
+                <input
+                  value={newStep.expected_outcome}
+                  onChange={(e) => setNewStep((s) => ({ ...s, expected_outcome: e.target.value }))}
+                  className="cyber-input"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="text-xs font-display tracking-wider text-slate">RISK IF SKIPPED</label>
+                <input
+                  value={newStep.risk_if_skipped}
+                  onChange={(e) => setNewStep((s) => ({ ...s, risk_if_skipped: e.target.value }))}
+                  className="cyber-input"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center gap-6 mt-4">
+              <label className="flex items-center gap-2 text-sm text-slate">
+                <input
+                  type="checkbox"
+                  checked={newStep.requires_approval}
+                  onChange={(e) => setNewStep((s) => ({ ...s, requires_approval: e.target.checked }))}
+                />
+                Requires approval
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate">
+                <input
+                  type="checkbox"
+                  checked={newStep.is_disruptive}
+                  onChange={(e) => setNewStep((s) => ({ ...s, is_disruptive: e.target.checked }))}
+                />
+                Disruptive
+              </label>
+            </div>
+
+            <div className="flex gap-2 mt-6">
+              <motion.button
+                onClick={handleAddManualStep}
+                className="cyber-btn-success flex-1"
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+              >
+                ADD STEP
+              </motion.button>
+              <motion.button
+                onClick={() => setShowAddModal(false)}
+                className="cyber-btn-outline px-6"
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+              >
+                CANCEL
+              </motion.button>
+            </div>
+          </motion.div>
+        </div>
+      )}
 
       {currentAnalysis ? (
         <>
@@ -294,6 +484,15 @@ export default function AIRemediationPage() {
                         >
                           <CheckIcon className="w-5 h-5" />
                           APPROVE & EXECUTE
+                        </motion.button>
+                        <motion.button
+                          onClick={() => handleDeleteStep(step.id)}
+                          className="cyber-btn-outline flex items-center justify-center gap-2 px-6"
+                          whileHover={{ scale: 1.02 }}
+                          whileTap={{ scale: 0.98 }}
+                        >
+                          <TrashIcon className="w-5 h-5" />
+                          DELETE
                         </motion.button>
                         <motion.button
                           onClick={() => handleReject(step.id)}
